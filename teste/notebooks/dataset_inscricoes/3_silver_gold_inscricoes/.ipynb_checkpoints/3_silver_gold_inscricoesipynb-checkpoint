@@ -1,0 +1,503 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "id": "553c19ae-788f-4a70-bbff-de2a77024c33",
+   "metadata": {
+    "papermill": {
+     "duration": 0.00544,
+     "end_time": "2024-01-13T21:19:59.856729",
+     "exception": false,
+     "start_time": "2024-01-13T21:19:59.851289",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "## Objetivo do notebook\n",
+    "#### O objetivo deste notebook é realizar a leitura de dados das origens do dataset alunos na camada silver e gravar de forma versionada na camada gold\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "98040be4-19b4-4b7f-a22c-f5a892413cb3",
+   "metadata": {
+    "papermill": {
+     "duration": 0.008522,
+     "end_time": "2024-01-13T21:19:59.873530",
+     "exception": false,
+     "start_time": "2024-01-13T21:19:59.865008",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "### Import Libs"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "id": "942dde0f-19c6-4ad1-8326-4441ac5e24a6",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-01-13T21:19:59.887926Z",
+     "iopub.status.busy": "2024-01-13T21:19:59.887644Z",
+     "iopub.status.idle": "2024-01-13T21:20:04.804981Z",
+     "shell.execute_reply": "2024-01-13T21:20:04.801319Z"
+    },
+    "papermill": {
+     "duration": 4.931104,
+     "end_time": "2024-01-13T21:20:04.811141",
+     "exception": false,
+     "start_time": "2024-01-13T21:19:59.880037",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Requirement already satisfied: minio in /opt/conda/lib/python3.11/site-packages (7.2.3)\n",
+      "Requirement already satisfied: certifi in /opt/conda/lib/python3.11/site-packages (from minio) (2023.7.22)\n",
+      "Requirement already satisfied: urllib3 in /opt/conda/lib/python3.11/site-packages (from minio) (1.26.18)\n",
+      "Requirement already satisfied: argon2-cffi in /opt/conda/lib/python3.11/site-packages (from minio) (23.1.0)\n",
+      "Requirement already satisfied: pycryptodome in /opt/conda/lib/python3.11/site-packages (from minio) (3.20.0)\n",
+      "Requirement already satisfied: typing-extensions in /opt/conda/lib/python3.11/site-packages (from minio) (4.8.0)\n",
+      "Requirement already satisfied: argon2-cffi-bindings in /opt/conda/lib/python3.11/site-packages (from argon2-cffi->minio) (21.2.0)\n",
+      "Requirement already satisfied: cffi>=1.0.1 in /opt/conda/lib/python3.11/site-packages (from argon2-cffi-bindings->argon2-cffi->minio) (1.16.0)\n",
+      "Requirement already satisfied: pycparser in /opt/conda/lib/python3.11/site-packages (from cffi>=1.0.1->argon2-cffi-bindings->argon2-cffi->minio) (2.21)\n",
+      "Requirement already satisfied: pyspark in /usr/local/spark/python (3.5.0)\n",
+      "Requirement already satisfied: py4j==0.10.9.7 in /opt/conda/lib/python3.11/site-packages (from pyspark) (0.10.9.7)\n"
+     ]
+    }
+   ],
+   "source": [
+    "!pip install minio\n",
+    "!pip install pyspark"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "id": "3f09124d-a137-4fbf-8ebe-d6d44e13083a",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-01-13T21:20:04.844841Z",
+     "iopub.status.busy": "2024-01-13T21:20:04.844602Z",
+     "iopub.status.idle": "2024-01-13T21:20:07.784669Z",
+     "shell.execute_reply": "2024-01-13T21:20:07.783894Z"
+    },
+    "papermill": {
+     "duration": 2.952196,
+     "end_time": "2024-01-13T21:20:07.786043",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:04.833847",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "from pyspark.sql import SparkSession\n",
+    "spark = SparkSession.builder.getOrCreate()\n",
+    "from datetime import datetime\n",
+    "import os\n",
+    "import pandas as pd\n",
+    "from minio import Minio\n",
+    "from pyspark.sql.functions import current_timestamp\n",
+    "\n",
+    "from pyspark.sql.functions import to_date\n",
+    "import glob\n",
+    "import pyarrow.parquet as pq\n",
+    "from io import BytesIO\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "53b4c9e6-5491-4420-9c7f-283ae7841c08",
+   "metadata": {
+    "papermill": {
+     "duration": 0.006953,
+     "end_time": "2024-01-13T21:20:07.797848",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:07.790895",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "### Definição de variáveis"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "id": "2849a6c2-22fe-47df-84db-cbfb4b06075b",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-01-13T21:20:07.812808Z",
+     "iopub.status.busy": "2024-01-13T21:20:07.812489Z",
+     "iopub.status.idle": "2024-01-13T21:20:07.818742Z",
+     "shell.execute_reply": "2024-01-13T21:20:07.817881Z"
+    },
+    "papermill": {
+     "duration": 0.01584,
+     "end_time": "2024-01-13T21:20:07.820192",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:07.804352",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# Parametros de input e output das origens\n",
+    "camadaLeitura= 'silver'\n",
+    "camadaEscrita = 'gold'\n",
+    "pasta = 'alunos'\n",
+    "temp_blobs = '/home/jovyan/notebooks/_temporary_blobs/' # pasta temporária para armazenamento de objetos\n",
+    "\n",
+    "# Conexão ao miniIO\n",
+    "minio_endpoint = 'minio:9000'\n",
+    "minio_access_key = 'minioaccesskey'\n",
+    "minio_secret_key = 'miniosecretkey'\n",
+    "minio_object_name = pasta\n",
+    "minio_client = Minio(minio_endpoint, access_key=minio_access_key, secret_key=minio_secret_key, secure=False)\n",
+    "\n",
+    "# Definição de variáveis para versionamento dos dados na camada bronze\n",
+    "timestamp = datetime.today().strftime('%Y%m%d')\n",
+    "minio_path = pasta + timestamp"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "435aa9ea-7da5-4f7a-a984-a7b344586fc2",
+   "metadata": {
+    "papermill": {
+     "duration": 0.007597,
+     "end_time": "2024-01-13T21:20:07.834154",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:07.826557",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "### Leitura da camada Bronze e Tratamento dos dados"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "id": "b1defde7-e845-470e-b6f9-2541eb36e3ed",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-01-13T21:20:07.849350Z",
+     "iopub.status.busy": "2024-01-13T21:20:07.848800Z",
+     "iopub.status.idle": "2024-01-13T21:20:09.275315Z",
+     "shell.execute_reply": "2024-01-13T21:20:09.274727Z"
+    },
+    "papermill": {
+     "duration": 1.435882,
+     "end_time": "2024-01-13T21:20:09.276775",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:07.840893",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# Lista para armazenar os DataFrames Pandas\n",
+    "dataframes = []\n",
+    "\n",
+    "# Itera sobre os objetos no bucket\n",
+    "for item in minio_client.list_objects(camadaLeitura, recursive=True):\n",
+    "    # Lê o conteúdo do objeto\n",
+    "    content = minio_client.get_object(camadaLeitura, item.object_name).read()\n",
+    "\n",
+    "    # Lê o conteúdo do objeto Parquet usando pyarrow e converte para DataFrame Pandas\n",
+    "    df_pandas = pq.read_table(BytesIO(content)).to_pandas()\n",
+    "\n",
+    "    # Adiciona o DataFrame Pandas à lista de DataFrames\n",
+    "    dataframes.append(df_pandas)\n",
+    "\n",
+    "# Concatena todos os DataFrames Pandas em um único DataFrame Pandas\n",
+    "consolidated_df_pandas = pd.concat(dataframes, ignore_index=True)\n",
+    "\n",
+    "# Cria uma sessão Spark e converte para DataFrame PySpark\n",
+    "df_alunos = spark.createDataFrame(consolidated_df_pandas)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "id": "c2e6c7c4-e0e4-4bb5-b910-a56027fb6c70",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-01-13T21:20:09.290586Z",
+     "iopub.status.busy": "2024-01-13T21:20:09.289816Z",
+     "iopub.status.idle": "2024-01-13T21:20:09.344666Z",
+     "shell.execute_reply": "2024-01-13T21:20:09.343918Z"
+    },
+    "papermill": {
+     "duration": 0.064684,
+     "end_time": "2024-01-13T21:20:09.346195",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:09.281511",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "# Cria coluna de etl_date\n",
+    "df_alunos = df_alunos.withColumn(\"etl_date\", current_timestamp())"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "9fd5188c-51a9-4893-8509-67f8db4b79bc",
+   "metadata": {
+    "papermill": {
+     "duration": 0.007287,
+     "end_time": "2024-01-13T21:20:09.358387",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:09.351100",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "### Gravação do dataframe em um diretório temporário"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "id": "2d18424f-56d6-40f7-85be-918f8b48b55e",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-01-13T21:20:09.372520Z",
+     "iopub.status.busy": "2024-01-13T21:20:09.372286Z",
+     "iopub.status.idle": "2024-01-13T21:20:12.670427Z",
+     "shell.execute_reply": "2024-01-13T21:20:12.669663Z"
+    },
+    "papermill": {
+     "duration": 3.307448,
+     "end_time": "2024-01-13T21:20:12.672333",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:09.364885",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [],
+   "source": [
+    "df_alunos.write.parquet(temp_blobs, mode=\"overwrite\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "dd34be7d-a6bc-482c-8f23-3d69e140c055",
+   "metadata": {
+    "papermill": {
+     "duration": 0.00715,
+     "end_time": "2024-01-13T21:20:12.685827",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:12.678677",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "### Gravação na camada Gold"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "id": "5a3624f4-76bc-4757-8371-4a7249b75697",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-01-13T21:20:12.701290Z",
+     "iopub.status.busy": "2024-01-13T21:20:12.700905Z",
+     "iopub.status.idle": "2024-01-13T21:20:12.917591Z",
+     "shell.execute_reply": "2024-01-13T21:20:12.916864Z"
+    },
+    "papermill": {
+     "duration": 0.226136,
+     "end_time": "2024-01-13T21:20:12.919066",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:12.692930",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Arquivo 'part-00000-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00000-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00001-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00001-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00002-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00002-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00003-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00003-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00004-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00004-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00005-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00005-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00006-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00006-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00007-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00007-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00008-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00008-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00009-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00009-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00010-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00010-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n",
+      "Arquivo 'part-00011-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet' enviado com sucesso para o MinIO em 'alunos20240113/part-00011-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet'.\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Conectar ao MinIO\n",
+    "minio_client = Minio(minio_endpoint, access_key=minio_access_key, secret_key=minio_secret_key, secure=False)\n",
+    "\n",
+    "if not minio_client.bucket_exists(camadaEscrita):\n",
+    "    minio_client.make_bucket(camadaEscrita)\n",
+    "\n",
+    "# Listar apenas arquivos Parquet no diretório\n",
+    "arquivos_parquet = glob.glob(os.path.join(temp_blobs, '*.parquet'))\n",
+    "\n",
+    "# Iterar sobre a lista de arquivos Parquet e enviar cada um para o MinIO\n",
+    "for arquivo_parquet in arquivos_parquet:\n",
+    "    try:\n",
+    "        # Enviar o arquivo para o MinIO\n",
+    "        nome_arquivo = os.path.basename(arquivo_parquet)\n",
+    "        minio_client.fput_object(camadaEscrita, os.path.join(minio_path, nome_arquivo), arquivo_parquet)\n",
+    "        print(f\"Arquivo '{nome_arquivo}' enviado com sucesso para o MinIO em '{os.path.join(minio_path, nome_arquivo)}'.\")\n",
+    "    except S3Error as e:\n",
+    "        print(f\"Erro ao enviar o arquivo para o MinIO: {e}\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "id": "5d7b6298-6223-4086-980b-9e1409b324ea",
+   "metadata": {
+    "papermill": {
+     "duration": 0.006813,
+     "end_time": "2024-01-13T21:20:12.930624",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:12.923811",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "source": [
+    "### Remove dados do diretório temporário de blobs"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "id": "a9373d36-1d90-45ab-bcf8-6c7cae5daffc",
+   "metadata": {
+    "execution": {
+     "iopub.execute_input": "2024-01-13T21:20:12.945126Z",
+     "iopub.status.busy": "2024-01-13T21:20:12.944630Z",
+     "iopub.status.idle": "2024-01-13T21:20:13.886931Z",
+     "shell.execute_reply": "2024-01-13T21:20:13.886182Z"
+    },
+    "papermill": {
+     "duration": 0.95135,
+     "end_time": "2024-01-13T21:20:13.888494",
+     "exception": false,
+     "start_time": "2024-01-13T21:20:12.937144",
+     "status": "completed"
+    },
+    "tags": []
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00000-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00001-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00002-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00003-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00004-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00005-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00006-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00007-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00008-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00009-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00010-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/.part-00011-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/._SUCCESS.crc deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00000-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00001-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00002-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00003-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00004-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00005-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00006-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00007-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00008-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00009-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00010-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/part-00011-52b09b20-10e1-46e8-899b-50af92e78d41-c000.snappy.parquet deletado com sucesso.\n",
+      "/home/jovyan/notebooks/_temporary_blobs/_SUCCESS deletado com sucesso.\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Liste todos os arquivos na pasta\n",
+    "arquivos_na_pasta = os.listdir(temp_blobs)\n",
+    "\n",
+    "# Itere sobre os arquivos e os delete\n",
+    "for arquivo in arquivos_na_pasta:\n",
+    "    caminho_completo = os.path.join(temp_blobs, arquivo)\n",
+    "    try:\n",
+    "        if os.path.isfile(caminho_completo):\n",
+    "            os.remove(caminho_completo)\n",
+    "            print(f'{caminho_completo} deletado com sucesso.')\n",
+    "    except Exception as e:\n",
+    "        print(f'Erro ao deletar {caminho_completo}: {e}')\n",
+    "\n",
+    "spark.stop()"
+   ]
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.11.6"
+  },
+  "papermill": {
+   "default_parameters": {},
+   "duration": 17.564949,
+   "end_time": "2024-01-13T21:20:16.516480",
+   "environment_variables": {},
+   "exception": null,
+   "input_path": "/home/jovyan/notebooks/dataset_alunos/3_silver_gold_aluno/3_silver_gold_aluno.ipynb",
+   "output_path": "/home/jovyan/notebooks/dataset_alunos/3_silver_gold_aluno/3_silver_gold_aluno.ipynb",
+   "parameters": {},
+   "start_time": "2024-01-13T21:19:58.951531",
+   "version": "2.5.0"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 5
+}
