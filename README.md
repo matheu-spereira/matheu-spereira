@@ -1,7 +1,7 @@
 <h1 align="center">🚀 Matheus Oliveira | Data Engineer & BI Specialist</h1>
 
 <p align="center">
-  🔍 Engenheiro de Dados, Big Data e Business Intelligence<br>
+  🔍 Engenharia de Dados, Big Data e Business Intelligence<br>
   ☁️ Atuação com Azure, Apache Spark, Delta Lake, Databricks e ferramentas de BI como Power BI<br>
   📊 Certificações: DP-900 | DP-203 | PL-300 | Databricks Associate <br>
 </p>
