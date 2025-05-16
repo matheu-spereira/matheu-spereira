@@ -1,4 +1,4 @@
-<h1 align="center">🚀 Matheus Pereira | Data Engineer & BI Specialist</h1>
+<h1 align="center">🚀 Matheus Oliveira | Data Engineer & BI Specialist</h1>
 
 <p align="center">
   🔍 Especialista em Engenharia de Dados, Big Data e Business Intelligence<br>
